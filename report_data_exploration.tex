@@ -1,0 +1,124 @@
+﻿% Draft of Section 2 (Data Exploration). Requires \usepackage{graphicx,booktabs}.
+% All numbers come from data_exploration.py (tables/ and figures/).
+
+\section{Data Exploration}
+
+\paragraph{Features and class balance.}
+The data has 870 rows from 290 respondents; each respondent answered the same
+12 questions once per sport, so Baseball, Basketball and Soccer have exactly 290
+rows each and no rebalancing is needed. Features: one numeric rating
+(\emph{ease}, 0--10), three 5-level Likert items (\emph{strategy},
+\emph{injury}, \emph{individual}), three multi-select questions (\emph{where},
+\emph{season}, \emph{music}; 21 options in total), four free-text answers
+(\emph{food}, \emph{colour}, \emph{song}, \emph{feel}) and a free-text price
+(\emph{pay}). The respondent \texttt{id} is not a feature: it says nothing about
+the sport and test respondents never appear in training.
+
+\paragraph{Test set.}
+Before any exploration we shuffled the respondent ids (seed 311) and split them
+70/15/15 into train (203 respondents, 609 rows), validation (44, 132) and test
+(43, 129), each balanced across classes. We split by respondent because a
+person's three rows are dependent: the id alone explains 39\% of the variance of
+\emph{ease}. All statistics, vocabularies, imputation and scaling values below
+come from the training split only; validation and test rows were never
+inspected.
+
+\paragraph{Missing values and inconsistencies.}
+Besides empty strings, missing answers appear as \emph{none}, \emph{n/a},
+\emph{idk}, \emph{no idea}, \emph{nothing in particular}, \emph{I don't watch
+this sport} and the Excel error \texttt{\#NAME?}; we map all of them to one
+marker (Table~\ref{tab:missing}). Seven training rows are completely empty and
+are dropped. \emph{song} is missing far more often for Baseball and Basketball
+than for Soccer (almost everyone recalls \emph{Waka Waka}), so missingness is
+predictive and we add a binary \emph{song missing} flag. \emph{No particular
+type} (\emph{music}) is a real option and \emph{none} in \emph{pay} means \$0, so
+neither counts as missing. Two \emph{ease} values are non-integers (3.5, 7.5) and
+are kept. Remaining gaps are imputed with the training median (numeric) or left
+as all-zero indicators (multi-select, text).
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{lcccccc}
+\toprule
+Missing (\%) & ease, Likert, multi-select & food & colour & song & feel & pay \\
+\midrule
+Overall    & 1.1--1.3 & 4.6 & 2.0 & 18.2 & 4.4 & 3.0 \\
+Baseball   & 1.5--2.0 & 3.9 & 2.5 & 26.1 & 6.4 & -- \\
+Basketball & 1.5--2.0 & 8.4 & 2.0 & 22.2 & 3.9 & -- \\
+Soccer     & 0.5      & 1.5 & 1.5 & 6.4  & 3.0 & -- \\
+\bottomrule
+\end{tabular}
+\caption{Missing values in the training split after normalizing missing markers.}
+\label{tab:missing}
+\end{table}
+
+\paragraph{Parsing \emph{pay}; outliers.}
+Prices come in many formats (\emph{\$1,000}, \emph{200CAD}, \emph{1k},
+\emph{Thirty dollars}, \emph{\$150--\$250}, \emph{At most 500 CAD.}). We remove
+thousands separators, expand \emph{k} and spelled-out numbers, take the midpoint
+of a range and otherwise the first number; clear refusals (\emph{not willing},
+\emph{nothing}) become 0. Answers on a ``1 to 10 scale'' or without a number
+(\emph{very willing}, \emph{hundreds of dollars}) are unparseable (1.8\%) and
+treated as missing. Values are heavily right-skewed (median \$100, mean \$262,
+max \$10{,}000; 12 answers exceed the 1.5$\times$IQR fence on the log scale).
+High prices are plausible for finals, so we cap at the training 99th percentile
+(\$3{,}000) and use $\log(1+\textit{pay})$.
+
+\paragraph{Numeric and Likert features.}
+Figure~\ref{fig:ordinal} shows monotone shifts in class means: Baseball is rated
+harder to start (mean \emph{ease} 4.06 vs.\ 6.06/6.22), less risky and more
+individual. The gap between the most distant class means divided by the pooled
+within-class SD is 1.02 (\emph{ease}), 0.87 (\emph{injury}), 0.82
+(\emph{individual}), 0.61 (\emph{pay}) and 0.48 (\emph{strategy}): useful, but
+mostly for separating Baseball from the rest. Spearman correlations between
+these features are at most 0.30, so none is redundant. Because the effect is
+monotone, Likert answers are encoded as ordinal values 1--5 (one column instead
+of five one-hot columns).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/05_numeric_likert_by_class.png}
+\caption{\emph{ease} per class (left) and Likert answers per class (1 = strongly
+disagree, 5 = strongly agree). Training split.}
+\label{fig:ordinal}
+\end{figure}
+
+\paragraph{Multi-select features.}
+Each option becomes a binary column. Several options separate classes sharply:
+\emph{Winter} (Basketball 59\% vs.\ $\sim$5\%), \emph{Indoor facility}
+(Basketball 96\% vs.\ Baseball 26\%), \emph{Latin} (Soccer 44\% vs.\ $\le$4\%),
+\emph{Hip-hop or rap} (Basketball 84\%) and \emph{Country} (Baseball 32\%).
+\emph{Summer} is ticked by 94\% of every class and is dropped as uninformative.
+
+\paragraph{Free-text features.}
+Answers are short (median 1--4 words). We lower-case them, remove the
+placeholders \emph{[this sport]}/\emph{[a competition]} and stop words, and
+build a binary bag-of-words per question on the training split, keeping words
+in at least 3 answers (95/25/94/120 words for food/colour/song/feel); unseen
+words are ignored at prediction time. A few words are nearly
+class-pure (Figure~\ref{fig:text}): \emph{orange} (111/116 Basketball),
+\emph{green} (99/110 Soccer), \emph{waka} (101/101 Soccer), \emph{ball game}
+(Baseball), \emph{drake} (Basketball), \emph{relaxed}/\emph{bored} (Baseball);
+most others are weak. Since counts are almost always 0/1, TF-IDF would mainly
+re-weight rare words; we compare both in Methodology.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/09_text_words_by_class.png}
+\caption{Ten most frequent words per text question: counts per class; shade =
+share of the word's occurrences in that class.}
+\label{fig:text}
+\end{figure}
+
+\paragraph{Scaling, dimensionality and predictive features.}
+The encoding gives about 361 columns for 602 training rows, so we favour simple
+models with strong regularization. Continuous features are standardized with
+training mean and SD (reused on validation/test to avoid leakage); this matters
+for k-NN and softmax regression with L2, not for trees or Naive Bayes. Training
+a softmax regression on one feature group at a time (5-fold CV grouped by
+respondent, training split) gives accuracies of 0.75 (\emph{colour}), 0.71
+(\emph{song}), 0.69 (\emph{music}), 0.60 (\emph{where}), 0.56 (\emph{food}),
+0.53 (\emph{season}) and 0.43--0.49 for the rest (chance 0.33). Many sparse
+indicators that each add a little evidence suit Naive Bayes and regularized
+softmax regression; sharp thresholds (\emph{Winter}, \emph{Indoor},
+\emph{ease}) suit decision trees and random forests.
