@@ -50,11 +50,14 @@ def read_csv(filename):
 
 
 def normalize(raw):
+    raw = raw.rename(columns=lambda c: re.sub(r'\s+', ' ', str(c)).strip())
     columns = {}
     for short, question in zip(FEATURES, QUESTIONS):
         source = question if question in raw else short
         if source not in raw:
-            raise ValueError(f'Missing survey column: {question}')
+            # A missing column is treated as unanswered so prediction still runs.
+            columns[short] = pd.Series(np.nan, index=raw.index, dtype=object)
+            continue
         columns[short] = raw[source].map(clean)
     return pd.DataFrame(columns, index=raw.index)
 

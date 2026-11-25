@@ -56,7 +56,7 @@ def fit_preprocessing(frame, min_df):
     return state
 
 
-def softmax_fit(x, y, rate, penalty):
+def softmax_fit(x, y, rate, penalty, max_updates=5000):
     # Contiguous transpose avoids repacking the same array at every update.
     xt = np.ascontiguousarray(x.T)
     w = np.zeros((x.shape[1], len(CLASSES)))
@@ -76,7 +76,7 @@ def softmax_fit(x, y, rate, penalty):
     stable = 0
     increases = 0
     status = 'iteration_limit'
-    for step in range(1, 5001):
+    for step in range(1, max_updates + 1):
         prob[rows, y] -= 1
         w -= rate * (xt @ prob / len(x) + penalty * w)
         b -= rate * prob.mean(axis=0)
@@ -102,7 +102,8 @@ def softmax_fit(x, y, rate, penalty):
 def fit_model(x, y, config, state):
     kind = config['family']
     if kind == 'softmax':
-        return softmax_fit(x, y, config['rate'], config['penalty']), None
+        return softmax_fit(x, y, config['rate'], config['penalty'],
+                           config.get('max_updates', 5000)), None
     if kind == 'tree':
         estimator = DecisionTreeClassifier(criterion='entropy', max_depth=config['depth'],
                                            min_samples_leaf=config['leaf'], random_state=42)
@@ -146,7 +147,7 @@ def metrics(y, prediction):
 
 
 def configs():
-    baseline, extension = [], []
+    baseline, extension, boundary = [], [], []
     for df in (2, 3, 5):
         baseline.extend(dict(family='knn', df=df, k=k, text_weight=1)
                         for k in (1, 3, 5, 9, 15))
@@ -158,9 +159,16 @@ def configs():
                          for k, w in product((1, 3, 5, 9, 15), (.5, 2)))
         extension.extend(dict(family='softmax', df=df, rate=r, penalty=p)
                          for r, p in product((.2, .4), (.0001, .001, .01, .1)))
+        # Boundary check: the earlier kNN champion used the largest k and the softmax
+        # champion used the smallest penalty while hitting the 5,000-update cap.
+        boundary.extend(dict(family='knn', df=df, k=k, text_weight=w)
+                        for k, w in product((21, 31, 45), (.5, 1, 2)))
+        boundary.extend(dict(family='softmax', df=df, rate=r, penalty=p, max_updates=20000)
+                        for r, p in product((.1, .2, .4), (0, .00001, .0001)))
     assert len(baseline) == 87
     return [dict(c, stage=stage, config_id=f'{stage}-{i+1:02d}')
-            for stage, grid in [('proposal', baseline), ('extension', extension)]
+            for stage, grid in [('proposal', baseline), ('extension', extension),
+                                ('boundary', boundary)]
             for i, c in enumerate(grid)]
 
 
